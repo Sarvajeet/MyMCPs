@@ -1,0 +1,12 @@
+{
+  "servers": [
+    {
+      "name": "Local Weather Server",
+      "url": "http://127.0.0.1:8000/mcp"
+    },
+    {
+      "name": "Another Example Server",
+      "url": "http://example.com/mcp"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+/* Basic styling for the chat window */
+body {
+    font-family: sans-serif;
+}
+
+#chat-window {
+    width: 400px;
+    margin: 20px auto;
+    border: 1px solid #ccc;
+    padding: 10px;
+}
+
+#chat-log {
+    height: 300px;
+    border: 1px solid #eee;
+    padding: 5px;
+    overflow-y: scroll;
+}
+
+#chat-input {
+    width: 300px;
+    padding: 5px;
+}
+
+#send-button {
+    width: 80px;
+    padding: 5px;
+}
