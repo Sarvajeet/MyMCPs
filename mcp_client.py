@@ -1,12 +1,12 @@
 import asyncio
 from typing import Optional
 from contextlib import AsyncExitStack
+import os
+import google.generativeai as genai
+from dotenv import load_dotenv
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-
-from anthropic import Anthropic
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -14,7 +14,9 @@ class MCPClient:
     def __init__(self):
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
-        self.anthropic = Anthropic()
+        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+
 
     async def connect_to_server(self, server_url: str):
         """Connect to a remote MCP server."""
@@ -41,68 +43,36 @@ class MCPClient:
             return "Not connected to a server."
 
         try:
-            messages = [{"role": "user", "content": query}]
-
             response = await self.session.list_tools()
-            available_tools = [{
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.inputSchema
-            } for tool in response.tools]
 
-            # Initial Claude API call
-            response = self.anthropic.messages.create(
-                model="claude-3-opus-20240229",
-                max_tokens=1000,
-                messages=messages,
-                tools=available_tools
-            )
+            gemini_tools = [
+                {"name": tool.name, "description": tool.description, "parameters": tool.inputSchema}
+                for tool in response.tools
+            ]
 
-            final_text = []
-            assistant_message_content = []
+            chat = self.model.start_chat(enable_automatic_function_calling=True)
+            response = chat.send_message(query, tools=gemini_tools)
 
-            for content in response.content:
-                if content.type == 'text':
-                    final_text.append(content.text)
-                    assistant_message_content.append(content)
-                elif content.type == 'tool_use':
-                    tool_name = content.name
-                    tool_args = content.input
+            for content in response:
+                for part in content.parts:
+                    if "function_call" in part:
+                        function_call = part.function_call
+                        tool_name = function_call.name
+                        tool_args = {key: value for key, value in function_call.args.items()}
 
-                    # Execute tool call
-                    result = await self.session.call_tool(tool_name, tool_args)
-                    final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
+                        tool_response = await self.session.call_tool(tool_name, tool_args)
 
-                    assistant_message_content.append(content)
-                    messages.append({
-                        "role": "assistant",
-                        "content": assistant_message_content
-                    })
-                    messages.append({
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": content.id,
-                                "content": result.content
-                            }
-                        ]
-                    })
+                        chat.send_message(
+                            genai.Part(
+                                function_response = genai.protos.FunctionResponse(
+                                    name=tool_name,
+                                    response=tool_response.model_dump()
+                                )
+                            )
+                        )
 
-                    # Get next response from Claude
-                    response = self.anthropic.messages.create(
-                        model="claude-3-opus-20240229",
-                        max_tokens=1000,
-                        messages=messages,
-                        tools=available_tools
-                    )
+            return response.text
 
-                    for content in response.content:
-                        if content.type == 'text':
-                            final_text.append(content.text)
-
-
-            return "\n".join(final_text)
         except Exception as e:
             return f"An error occurred: {e}"
 
@@ -123,4 +93,9 @@ async def main():
     await client.cleanup()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # The user needs to provide their Gemini API key in a .env file
+    # with the key GEMINI_API_KEY.
+    if os.getenv("GEMINI_API_KEY") is None:
+        print("Please set the GEMINI_API_KEY environment variable in a .env file.")
+    else:
+        asyncio.run(main())
